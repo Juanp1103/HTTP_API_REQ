@@ -1,65 +1,103 @@
 using System.Collections;
+using TMPro;
 using UnityEngine;
 using UnityEngine.Networking;
 using UnityEngine.UI;
 
 public class Http : MonoBehaviour
 {
-    [SerializeField]
-    private int characterId = 12;
-    [SerializeField]
-    private string URL = "https://rickandmortyapi.com/api/character";
-    [SerializeField]
-    private RawImage CharacterImage;
+    [SerializeField] private string jugadoresURL;
+    [SerializeField] private Transform cartasContainer;
+    [SerializeField] private GameObject cartaPrefab;
+    [SerializeField] private TextMeshProUGUI nombreJugadorText;
+
+    private JugadorLista listaJugadores;
+    private int indiceJugador = 0;
 
     void Start()
     {
-        StartCoroutine(GetText());
+        StartCoroutine(GetJugadores());
     }
 
-    IEnumerator GetText()
+    IEnumerator GetJugadores()
     {
-        UnityWebRequest www = UnityWebRequest.Get(URL + "/" + characterId);
+        UnityWebRequest www = UnityWebRequest.Get(jugadoresURL);
         yield return www.SendWebRequest();
 
-        if (www.result != UnityWebRequest.Result.Success)
+        if (www.result == UnityWebRequest.Result.Success)
         {
-            Debug.Log(www.error);
-            if (www.responseCode == 404)
-            {
-                Debug.Log("Character not found");
-            }
-        }
-        else
-        {
-            Character character = JsonUtility.FromJson<Character>(www.downloadHandler.text);
-            Debug.Log(character.name + " is a " + character.species);
+            listaJugadores = JsonUtility.FromJson<JugadorLista>(www.downloadHandler.text);
 
-            StartCoroutine(GetTexture(character.image));
-
-
+            CargarJugador();
         }
     }
-
-    IEnumerator GetTexture(string imageUrl)
+    void CargarJugador()
     {
-        using (UnityWebRequest uwr = UnityWebRequestTexture.GetTexture(imageUrl))
-        {
-            yield return uwr.SendWebRequest();
+        Jugador jugadorActual = listaJugadores.jugadores[indiceJugador];
 
-            if (uwr.result != UnityWebRequest.Result.Success)
-            {
-                Debug.Log(uwr.error);
-            }
-            else
-            {
-                // Get downloaded asset bundle
-                var texture = DownloadHandlerTexture.GetContent(uwr);
-                CharacterImage.texture = texture;
-            }
+        nombreJugadorText.text = jugadorActual.nombre;
+
+        string ids = string.Join(",", jugadorActual.cartas);
+
+        StartCoroutine(GetCharacters(ids));
+    }
+    IEnumerator GetCharacters(string ids)
+    {
+        string url = "https://rickandmortyapi.com/api/character/" + ids;
+
+        UnityWebRequest www = UnityWebRequest.Get(url);
+        yield return www.SendWebRequest();
+
+        if (www.result == UnityWebRequest.Result.Success)
+        {
+            Character[] characters = JsonHelper.FromJson<Character>(www.downloadHandler.text);
+
+            MostrarCartas(characters);
         }
+    }
+    void LimpiarCartas()
+    {
+        foreach (Transform child in cartasContainer)
+        {
+            Destroy(child.gameObject);
+        }
+    }
+    void MostrarCartas(Character[] characters)
+    {
+        LimpiarCartas();
+
+        foreach (Character c in characters)
+        {
+            GameObject carta = Instantiate(cartaPrefab, cartasContainer);
+            carta.transform.Find("Nombre").GetComponent<TMP_Text>().text = c.name;
+            carta.transform.Find("Especie").GetComponent<TMP_Text>().text = c.species;
+
+            StartCoroutine(DescargarImagen(c.image, carta));
+        }
+    }
+    IEnumerator DescargarImagen(string url, GameObject carta)
+    {
+        UnityWebRequest uwr = UnityWebRequestTexture.GetTexture(url);
+        yield return uwr.SendWebRequest();
+
+        if (uwr.result == UnityWebRequest.Result.Success)
+        {
+            Texture2D texture = DownloadHandlerTexture.GetContent(uwr);
+            carta.transform.Find("Imagen").GetComponent<RawImage>().texture = texture;
+        }
+    }
+    public void CambiarJugador()
+    {
+        indiceJugador++;
+
+        if (indiceJugador >= listaJugadores.jugadores.Length)
+            indiceJugador = 0;
+
+        CargarJugador();
     }
 }
+
+[System.Serializable]
 class Character
 {
     public int id;
@@ -69,5 +107,34 @@ class Character
 
 }
 
+[System.Serializable]
+public class Jugador
+{
+    public int id;
+    public string nombre;
+    public int[] cartas;
+}
+
+[System.Serializable]
+public class JugadorLista
+{
+    public Jugador[] jugadores;
+}
+
+public static class JsonHelper
+{
+    public static T[] FromJson<T>(string json)
+    {
+        string newJson = "{ \"array\": " + json + "}";
+        Wrapper<T> wrapper = JsonUtility.FromJson<Wrapper<T>>(newJson);
+        return wrapper.array;
+    }
+
+    [System.Serializable]
+    private class Wrapper<T>
+    {
+        public T[] array;
+    }
+}
 
 
