@@ -12,6 +12,8 @@ public class APIManager : MonoBehaviour
     private string token;
     private string username;
 
+    private User currentUser;
+
     [Header("Panels")]
     public GameObject panelLogin;
     public GameObject panelRegister;
@@ -36,13 +38,15 @@ public class APIManager : MonoBehaviour
     int score = 0;
 
     void Start()
-    {
-        if (PlayerPrefs.HasKey("token"))
+    {       
+        token = PlayerPrefs.GetString("token", null);
+        username = PlayerPrefs.GetString("username", null);
+        if (!string.IsNullOrEmpty(token) && !string.IsNullOrEmpty(username))
         {
-            token = PlayerPrefs.GetString("token");
-            username = PlayerPrefs.GetString("username");
             usernameText.text = username;
             MostrarJuego();
+
+            StartCoroutine(GetUsuario());
             StartCoroutine(GetLeaderboard());
         }
         else
@@ -83,19 +87,16 @@ public class APIManager : MonoBehaviour
     public void RegisterButton()
     {
         StartCoroutine(Register(registerUsername.text, registerPassword.text));
-
-        Debug.Log("Intentando login con: " + loginUsername.text + " " + loginPassword.text);
     }
 
     IEnumerator Register(string username, string password)
     {
         string url = baseURL + "/api/usuarios";
 
-        UserData user = new UserData { username = username, password = password};
+        Userauth user = new Userauth { username = username, password = password};
         string json = JsonUtility.ToJson(user);
 
         UnityWebRequest req = UnityWebRequest.Post(url, json, "application/json");
-        Debug.Log("Url: " + url);
 
         yield return req.SendWebRequest();
 
@@ -106,7 +107,7 @@ public class APIManager : MonoBehaviour
         }
         else
         {
-            Debug.LogError("Login failed" + req.error);
+            Debug.LogError("Register failed " + req.error);
         }
     }
 
@@ -117,29 +118,25 @@ public class APIManager : MonoBehaviour
     public void LoginButton()
     {
         StartCoroutine(Login(loginUsername.text, loginPassword.text));
-        Debug.Log("Intentando login con: " + loginUsername.text + " " + loginPassword.text);
     }
 
     IEnumerator Login(string username, string password)
     {
         string url = baseURL + "/api/auth/login";
-        UserData user = new UserData { username = username, password = password };
+
+        Userauth user = new Userauth { username = username, password = password};
         string json = JsonUtility.ToJson(user);
 
         UnityWebRequest req = UnityWebRequest.Post(url, json, "application/json");
-        Debug.Log("Url: " + url);
-
 
         yield return req.SendWebRequest();
 
         if (req.result == UnityWebRequest.Result.Success)
         {
             LoginResponse response = JsonUtility.FromJson<LoginResponse>(req.downloadHandler.text);
-            Debug.Log("Login exitoso. Token: " + response.token);
-            
+
             token = response.token;
             username = response.usuario.username;
-
             PlayerPrefs.SetString("token", token);
             PlayerPrefs.SetString("username", username);
 
@@ -147,11 +144,40 @@ public class APIManager : MonoBehaviour
 
             MostrarJuego();
 
+            StartCoroutine(GetUsuario());
             StartCoroutine(GetLeaderboard());
         }
         else
         {
-            Debug.LogError("Login failed" + req.error);
+            Debug.LogError("Login failed " + req.error);
+        }
+    }
+
+    // --------------------
+    // GET USUARIO
+    // --------------------
+
+    IEnumerator GetUsuario()
+    {
+        string url = baseURL + "/api/usuarios/";
+
+        UnityWebRequest req = UnityWebRequest.Get(url + username);
+        req.SetRequestHeader("x-token", token);
+
+        yield return req.SendWebRequest();
+
+        if (req.result == UnityWebRequest.Result.Success)
+        {
+            currentUser = JsonUtility.FromJson<User>(req.downloadHandler.text);
+
+            score = currentUser.data.score;
+
+            scoreText.text = "Score: " + score;
+            Debug.Log(req.downloadHandler.text);
+        }
+        else
+        {
+            Debug.LogError("Error obteniendo usuario: " + req.error);
         }
     }
 
@@ -162,7 +188,6 @@ public class APIManager : MonoBehaviour
     public void Click()
     {
         score++;
-
         scoreText.text = "Score: " + score;
     }
 
@@ -177,24 +202,20 @@ public class APIManager : MonoBehaviour
 
     IEnumerator UpdateScore(int score)
     {
-        string url = baseURL + "/score";
-
-        string json = "{\"score\":" + score + "}";
-
-        UnityWebRequest req = new UnityWebRequest(url, "POST");
-
-        byte[] bodyRaw = Encoding.UTF8.GetBytes(json);
-
-        req.uploadHandler = new UploadHandlerRaw(bodyRaw);
-        req.downloadHandler = new DownloadHandlerBuffer();
-
-        req.SetRequestHeader("Content-Type", "application/json");
-        req.SetRequestHeader("Authorization", "Bearer " + token);
-
+        string url = baseURL + "/api/usuarios/";
+        currentUser.username = username;
+        currentUser.data.score = score;
+        string json = JsonUtility.ToJson(currentUser);
+        UnityWebRequest req = UnityWebRequest.Put(url, json);
+        req.method = "PATCH";
+        Debug.Log(json);
+        req.SetRequestHeader("x-token", token);
+        
         yield return req.SendWebRequest();
 
         if (req.result == UnityWebRequest.Result.Success)
         {
+            StartCoroutine(GetUsuario());
             Debug.Log("Score actualizado");
             StartCoroutine(GetLeaderboard());
         }
@@ -205,32 +226,56 @@ public class APIManager : MonoBehaviour
     }
 
     // --------------------
+    // AUTO SAVE
+    // --------------------
+
+    IEnumerator AutoSave()
+    {
+        while (true)
+        {
+            yield return new WaitForSeconds(10);
+            StartCoroutine(UpdateScore(score));
+        }
+    }
+
+    // --------------------
     // LEADERBOARD
     // --------------------
 
     IEnumerator GetLeaderboard()
     {
-        string url = baseURL + "/scores";
+            string url = baseURL + "/api/usuarios";
 
-        UnityWebRequest req = UnityWebRequest.Get(url);
+            UnityWebRequest req = UnityWebRequest.Get(url);
+            req.SetRequestHeader("x-token", token);
 
         yield return req.SendWebRequest();
 
-        if (req.result == UnityWebRequest.Result.Success)
-        {
-            ScoreList scores = JsonUtility.FromJson<ScoreList>(req.downloadHandler.text);
-
-            foreach (Transform child in leaderboardContainer)
-                Destroy(child.gameObject);
-
-            foreach (ScoreEntry s in scores.scores)
+            if (req.result == UnityWebRequest.Result.Success)
             {
-                GameObject item = Instantiate(leaderboardItemPrefab, leaderboardContainer);
+                UserList users = JsonUtility.FromJson<UserList>(req.downloadHandler.text);
 
-                item.transform.Find("Username").GetComponent<TMP_Text>().text = s.username;
-                item.transform.Find("Score").GetComponent<TMP_Text>().text = s.score.ToString();
+                foreach (Transform child in leaderboardContainer)
+                    Destroy(child.gameObject);
+
+                System.Array.Sort(users.usuarios, (a, b) => b.data.score.CompareTo(a.data.score));
+
+                int top = Mathf.Min(3, users.usuarios.Length);
+
+                for (int i = 0; i < top; i++)
+                {
+                    User u = users.usuarios[i];
+
+                    GameObject item = Instantiate(leaderboardItemPrefab, leaderboardContainer);
+
+                    item.transform.Find("Username").GetComponent<TMP_Text>().text = (i + 1) + ". " + u.username;
+                    item.transform.Find("Score").GetComponent<TMP_Text>().text = u.data.score.ToString();
+                }
             }
-        }
+            else
+            {
+                Debug.LogError(req.downloadHandler.text);
+            }
     }
 
     // --------------------
@@ -242,24 +287,34 @@ public class APIManager : MonoBehaviour
         PlayerPrefs.DeleteKey("token");
 
         score = 0;
-
         scoreText.text = "Score: 0";
 
         MostrarLogin();
     }
 }
 
+// --------------------
+// CLASES
+// --------------------
+
 [System.Serializable]
-public class UserData
+public class Userauth
 {
     public string username;
     public string password;
 }
+
 [System.Serializable]
 public class User
 {
-    public string _id;
     public string username;
+    public UserData data;
+}
+
+[System.Serializable]
+public class UserData
+{
+    public int score;
 }
 
 [System.Serializable]
@@ -270,14 +325,7 @@ public class LoginResponse
 }
 
 [System.Serializable]
-public class ScoreEntry
+public class UserList
 {
-    public string username;
-    public int score;
-}
-
-[System.Serializable]
-public class ScoreList
-{
-    public ScoreEntry[] scores;
+    public User[] usuarios;
 }
