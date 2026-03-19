@@ -35,7 +35,7 @@ public class APIManager : MonoBehaviour
     public Transform leaderboardContainer;
     public GameObject leaderboardItemPrefab;
 
-    int score = 0;
+    int score;
 
     void Start()
     {       
@@ -120,11 +120,11 @@ public class APIManager : MonoBehaviour
         StartCoroutine(Login(loginUsername.text, loginPassword.text));
     }
 
-    IEnumerator Login(string username, string password)
+    IEnumerator Login(string Username, string password)
     {
         string url = baseURL + "/api/auth/login";
 
-        Userauth user = new Userauth { username = username, password = password};
+        Userauth user = new Userauth { username = Username, password = password};
         string json = JsonUtility.ToJson(user);
 
         UnityWebRequest req = UnityWebRequest.Post(url, json, "application/json");
@@ -138,9 +138,9 @@ public class APIManager : MonoBehaviour
             token = response.token;
             username = response.usuario.username;
             PlayerPrefs.SetString("token", token);
-            PlayerPrefs.SetString("username", username);
+            PlayerPrefs.SetString("username", Username);
 
-            usernameText.text = username;
+            usernameText.text = Username;
 
             MostrarJuego();
 
@@ -173,7 +173,7 @@ public class APIManager : MonoBehaviour
             score = currentUser.data.score;
 
             scoreText.text = "Score: " + score;
-            Debug.Log(req.downloadHandler.text);
+            Debug.Log("Getusuario" + req.downloadHandler.text);
         }
         else
         {
@@ -187,7 +187,7 @@ public class APIManager : MonoBehaviour
 
     public void Click()
     {
-        score++;
+        score+=1000;
         scoreText.text = "Score: " + score;
     }
 
@@ -206,35 +206,32 @@ public class APIManager : MonoBehaviour
         currentUser.username = username;
         currentUser.data.score = score;
         string json = JsonUtility.ToJson(currentUser);
-        UnityWebRequest req = UnityWebRequest.Put(url, json);
-        req.method = "PATCH";
-        Debug.Log(json);
+
+        //UnityWebRequest req = UnityWebRequest.Put(url, json);
+        //req.method = "PATCH";
+        //Debug.Log("jspn score" + json );
+        //req.SetRequestHeader("x-token", token);
+
+        UnityWebRequest req = new UnityWebRequest(url, "PATCH");
+
+        byte[] bodyRaw = Encoding.UTF8.GetBytes(json);
+
+        req.uploadHandler = new UploadHandlerRaw(bodyRaw);
+        req.downloadHandler = new DownloadHandlerBuffer();
+
+        req.SetRequestHeader("Content-Type", "application/json");
         req.SetRequestHeader("x-token", token);
-        
+
         yield return req.SendWebRequest();
 
         if (req.result == UnityWebRequest.Result.Success)
         {
-            StartCoroutine(GetUsuario());
             Debug.Log("Score actualizado");
             StartCoroutine(GetLeaderboard());
         }
         else
         {
             Debug.LogError(req.downloadHandler.text);
-        }
-    }
-
-    // --------------------
-    // AUTO SAVE
-    // --------------------
-
-    IEnumerator AutoSave()
-    {
-        while (true)
-        {
-            yield return new WaitForSeconds(10);
-            StartCoroutine(UpdateScore(score));
         }
     }
 
